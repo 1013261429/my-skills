@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# perf-regression: 性能回归检测
+# Usage: perf-regression --baseline baseline.json --current current.json [--threshold 10]
+
+set -euo pipefail
+
+BASELINE=""
+CURRENT=""
+THRESHOLD=10  # Percentage
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --baseline)
+            BASELINE="$2"
+            shift 2
+            ;;
+        --current)
+            CURRENT="$2"
+            shift 2
+            ;;
+        --threshold)
+            THRESHOLD="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$BASELINE" ]] || [[ -z "$CURRENT" ]]; then
+    echo "Usage: perf-regression --baseline baseline.json --current current.json [--threshold 10]"
+    exit 1
+fi
+
+if [[ ! -f "$BASELINE" ]] || [[ ! -f "$CURRENT" ]]; then
+    echo "Benchmark files not found"
+    exit 1
+fi
+
+echo "=== Performance Regression Analysis ==="
+echo "Baseline: $BASELINE"
+echo "Current: $CURRENT"
+echo "Threshold: ${THRESHOLD}%"
+echo ""
+
+if command -v jq >/dev/null 2>&1; then
+    BASE_AVG=$(jq -r '.results.average_ms' "$BASELINE")
+    CUR_AVG=$(jq -r '.results.average_ms' "$CURRENT")
+    
+    DIFF=$(echo "scale=2; $CUR_AVG - $BASE_AVG" | bc 2>/dev/null || echo "0")
+    PCT=$(echo "scale=2; ($DIFF / $BASE_AVG) * 100" | bc 2>/dev/null || echo "0")
+    
+    echo "Baseline average: ${BASE_AVG}ms"
+    echo "Current average: ${CUR_AVG}ms"
+    echo "Difference: ${DIFF}ms (${PCT}%)"
+    echo ""
+    
+    if (( $(echo "$PCT > $THRESHOLD" | bc -l 2>/dev/null || echo 0) )); then
+        echo "⚠ REGRESSION DETECTED: Performance degraded by ${PCT}%"
+        echo "  This exceeds the threshold of ${THRESHOLD}%"
+        exit 1
+    elif (( $(echo "$PCT < -$THRESHOLD" | bc -l 2>/dev/null || echo 0) )); then
+        echo "✓ IMPROVEMENT: Performance improved by ${PCT}%"
+    else
+        echo "✓ No significant change detected"
+    fi
+else
+    echo "jq required for regression analysis"
+    exit 1
+fi

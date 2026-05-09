@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# pr-assign: PR智能分配
+# Usage: pr-assign --pr <number> [--strategy round-robin|load-balance|expertise]
+
+set -euo pipefail
+
+PR=""
+STRATEGY="round-robin"
+REPO=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --pr)
+            PR="$2"
+            shift 2
+            ;;
+        --strategy)
+            STRATEGY="$2"
+            shift 2
+            ;;
+        --repo)
+            REPO="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$PR" ]]; then
+    echo "Usage: pr-assign --pr <number> [--strategy round-robin|load-balance|expertise]"
+    exit 1
+fi
+
+# Auto-detect repo
+if [[ -z "$REPO" ]]; then
+    REPO=$(git remote get-url origin 2>/dev/null | sed 's/.*github.com[:\/]//' | sed 's/\.git$//')
+fi
+
+echo "=== PR Assignment ==="
+echo "PR: #$PR"
+echo "Strategy: $STRATEGY"
+echo "Repo: $REPO"
+echo ""
+
+if command -v gh >/dev/null 2>&1; then
+    # Get contributors
+    CONTRIBUTORS=$(gh api repos/$REPO/contributors 2>/dev/null | jq -r '.[].login' 2>/dev/null | head -10)
+    
+    case "$STRATEGY" in
+        round-robin)
+            # Simple round-robin based on PR number
+            ASSIGNEE=$(echo "$CONTRIBUTORS" | sed -n "$((PR % $(echo "$CONTRIBUTORS" | wc -l) + 1))p")
+            ;;
+        load-balance)
+            # Find contributor with least open PRs
+            ASSIGNEE=$(echo "$CONTRIBUTORS" | while read -r user; do
+                count=$(gh search prs --repo "$REPO" --author "$user" --state open 2>/dev/null | wc -l)
+                echo "$count $user"
+            done | sort -n | head -1 | cut -d' ' -f2-)
+            ;;
+        expertise)
+            # Get files changed and match to contributor expertise
+            FILES=$(gh pr diff "$PR" --repo "$REPO" --name-only 2>/dev/null)
+            ASSIGNEE=$(echo "$CONTRIBUTORS" | head -1)  # Simplified
+            ;;
+    esac
+    
+    if [[ -n "$ASSIGNEE" ]]; then
+        echo "Assigning to: $ASSIGNEE"
+        gh pr edit "$PR" --repo "$REPO" --add-assignee "$ASSIGNEE" 2>/dev/null || echo "Could not assign PR"
+    else
+        echo "Could not determine assignee"
+    fi
+else
+    echo "GitHub CLI not found"
+fi

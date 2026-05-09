@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# rbac-audit: 审计当前项目的权限配置
+# Usage: rbac-audit [--format=json|table]
+
+set -euo pipefail
+
+FORMAT="${1:-table}"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+echo "=== RBAC Audit Report ==="
+echo "Project: $PROJECT_ROOT"
+echo "Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo ""
+
+# Check .claw/settings.local.json for permission configs
+SETTINGS_FILE="$PROJECT_ROOT/.claw/settings.local.json"
+if [[ -f "$SETTINGS_FILE" ]]; then
+    echo "✓ Settings file found"
+    if command -v jq >/dev/null 2>&1; then
+        PERMISSION_MODE=$(jq -r '.permissions.defaultMode // "not set"' "$SETTINGS_FILE")
+        echo "  Default permission mode: $PERMISSION_MODE"
+        
+        # List allowed tools if configured
+        ALLOWED_TOOLS=$(jq -r '.permissions.allowedTools // empty' "$SETTINGS_FILE" 2>/dev/null)
+        if [[ -n "$ALLOWED_TOOLS" ]]; then
+            echo "  Allowed tools: $ALLOWED_TOOLS"
+        fi
+    else
+        echo "  (install jq for detailed parsing)"
+    fi
+else
+    echo "✗ No settings file found at $SETTINGS_FILE"
+fi
+
+# Check for .claw.json or .codex.json config files
+for config in .claw.json .codex.json .agent.json; do
+    if [[ -f "$PROJECT_ROOT/$config" ]]; then
+        echo "✓ Found config: $config"
+    fi
+done
+
+# Audit file permissions
+echo ""
+echo "=== File Permission Audit ==="
+find "$PROJECT_ROOT" -maxdepth 2 -type f \( -name "*.sh" -o -name "*.py" -o -name "*.rs" \) -perm /111 | while read -r f; do
+    echo "  Executable: $f"
+done
+
+echo ""
+echo "=== Recommendations ==="
+echo "1. Set permissions.defaultMode to 'plan' for safety"
+echo "2. Use --allowedTools to restrict tool access"
+echo "3. Review executable scripts regularly"

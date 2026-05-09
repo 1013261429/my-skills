@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# ci-pipeline: CI流水线触发与状态查询
+# Usage: ci-pipeline [--trigger] [--status] [--workflow <name>]
+
+set -euo pipefail
+
+TRIGGER=0
+STATUS=0
+WORKFLOW=""
+REPO=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --trigger)
+            TRIGGER=1
+            shift
+            ;;
+        --status)
+            STATUS=1
+            shift
+            ;;
+        --workflow)
+            WORKFLOW="$2"
+            shift 2
+            ;;
+        --repo)
+            REPO="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Auto-detect repo
+if [[ -z "$REPO" ]]; then
+    REPO=$(git remote get-url origin 2>/dev/null | sed 's/.*github.com[:\/]//' | sed 's/\.git$//')
+fi
+
+echo "=== CI Pipeline ==="
+echo "Repo: $REPO"
+echo ""
+
+if command -v gh >/dev/null 2>&1; then
+    if [[ "$TRIGGER" -eq 1 ]]; then
+        echo "Triggering workflow..."
+        if [[ -n "$WORKFLOW" ]]; then
+            gh workflow run "$WORKFLOW" --repo "$REPO" 2>/dev/null && echo "✓ Workflow triggered"
+        else
+            echo "Available workflows:"
+            gh workflow list --repo "$REPO" 2>/dev/null || true
+        fi
+    fi
+    
+    if [[ "$STATUS" -eq 1 ]] || [[ "$TRIGGER" -eq 0 ]]; then
+        echo "=== Recent Runs ==="
+        gh run list --repo "$REPO" -L 5 2>/dev/null || echo "Could not fetch runs"
+    fi
+else
+    echo "GitHub CLI not found"
+fi

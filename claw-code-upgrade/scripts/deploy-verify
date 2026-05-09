@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# deploy-verify: 部署验证
+# Usage: deploy-verify --url <url> [--health-path /health] [--timeout 30]
+
+set -euo pipefail
+
+URL=""
+HEALTH_PATH="/health"
+TIMEOUT=30
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --url)
+            URL="$2"
+            shift 2
+            ;;
+        --health-path)
+            HEALTH_PATH="$2"
+            shift 2
+            ;;
+        --timeout)
+            TIMEOUT="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$URL" ]]; then
+    echo "Usage: deploy-verify --url <url> [--health-path /health] [--timeout 30]"
+    exit 1
+fi
+
+echo "=== Deployment Verification ==="
+echo "URL: $URL"
+echo "Health path: $HEALTH_PATH"
+echo "Timeout: ${TIMEOUT}s"
+echo ""
+
+# Test main URL
+echo "Testing main URL..."
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" "$URL" 2>/dev/null || echo "000")
+
+if [[ "$HTTP_CODE" == "200" ]]; then
+    echo "✓ Main URL responding (HTTP $HTTP_CODE)"
+else
+    echo "✗ Main URL failed (HTTP $HTTP_CODE)"
+fi
+
+# Test health endpoint
+if [[ -n "$HEALTH_PATH" ]]; then
+    echo ""
+    echo "Testing health endpoint..."
+    HEALTH_URL="${URL%/}$HEALTH_PATH"
+    HEALTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" "$HEALTH_URL" 2>/dev/null || echo "000")
+    
+    if [[ "$HEALTH_CODE" == "200" ]]; then
+        echo "✓ Health check passing (HTTP $HEALTH_CODE)"
+        RESPONSE_TIME=$(curl -s -o /dev/null -w "%{time_total}" --max-time "$TIMEOUT" "$HEALTH_URL" 2>/dev/null || echo "0")
+        echo "  Response time: ${RESPONSE_TIME}s"
+    else
+        echo "✗ Health check failed (HTTP $HEALTH_CODE)"
+    fi
+fi
+
+# Test common API endpoints
+echo ""
+echo "Testing API endpoints..."
+for endpoint in "/api/health" "/api/status" "/version"; do
+    ENDPOINT_URL="${URL%/}$endpoint"
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$ENDPOINT_URL" 2>/dev/null || echo "000")
+    if [[ "$CODE" != "404" ]] && [[ "$CODE" != "000" ]]; then
+        echo "  $endpoint: HTTP $CODE"
+    fi
+done
+
+echo ""
+echo "=== Verification Complete ==="

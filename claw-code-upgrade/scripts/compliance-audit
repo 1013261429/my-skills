@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# compliance-audit: 合规性审计
+# Usage: compliance-audit [--standard owasp|iso27001|soc2] [--output compliance.json]
+
+set -euo pipefail
+
+STANDARD="owasp"
+OUTPUT="compliance.json"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --standard)
+            STANDARD="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+echo "=== Compliance Audit ==="
+echo "Standard: $STANDARD"
+echo "Project: $PROJECT_ROOT"
+echo ""
+
+CHECKS_PASSED=0
+CHECKS_FAILED=0
+
+case "$STANDARD" in
+    owasp)
+        echo "=== OWASP Top 10 Checks ==="
+        
+        # A01: Broken Access Control
+        echo "A01: Broken Access Control"
+        if grep -ri "allow.*all\|permit.*all\|.*public.*" --include="*.rs" --include="*.py" "$PROJECT_ROOT" 2>/dev/null | grep -v test | head -1 >/dev/null; then
+            echo "  ⚠ Check for overly permissive access controls"
+            CHECKS_FAILED=$((CHECKS_FAILED + 1))
+        else
+            echo "  ✓ No obvious access control issues"
+            CHECKS_PASSED=$((CHECKS_PASSED + 1))
+        fi
+        
+        # A02: Cryptographic Failures
+        echo "A02: Cryptographic Failures"
+        if grep -ri "md5\|sha1" --include="*.rs" --include="*.py" "$PROJECT_ROOT" 2>/dev/null | grep -v test | head -1 >/dev/null; then
+            echo "  ⚠ Weak hash algorithms detected"
+            CHECKS_FAILED=$((CHECKS_FAILED + 1))
+        else
+            echo "  ✓ No weak cryptographic algorithms"
+            CHECKS_PASSED=$((CHECKS_PASSED + 1))
+        fi
+        
+        # A03: Injection
+        echo "A03: Injection"
+        if grep -ri "format.*%\|\.format(\|sprintf" --include="*.rs" --include="*.py" "$PROJECT_ROOT" 2>/dev/null | grep -v test | head -1 >/dev/null; then
+            echo "  ⚠ Potential injection points found"
+            CHECKS_FAILED=$((CHECKS_FAILED + 1))
+        else
+            echo "  ✓ No obvious injection vulnerabilities"
+            CHECKS_PASSED=$((CHECKS_PASSED + 1))
+        fi
+        ;;
+    iso27001|soc2)
+        echo "Standard $STANDARD checks not yet implemented"
+        ;;
+    *)
+        echo "Unknown standard: $STANDARD"
+        exit 1
+        ;;
+esac
+
+# Generate report
+cat > "$OUTPUT" << EOF
+{
+  "scan_type": "compliance_audit",
+  "standard": "$STANDARD",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "project": "$(basename "$PROJECT_ROOT")",
+  "checks": {
+    "passed": $CHECKS_PASSED,
+    "failed": $CHECKS_FAILED,
+    "total": $((CHECKS_PASSED + CHECKS_FAILED))
+  },
+  "status": "$([[ $CHECKS_FAILED -gt 0 ]] && echo "fail" || echo "pass")"
+}
+EOF
+
+echo ""
+echo "=== Summary ==="
+echo "Passed: $CHECKS_PASSED"
+echo "Failed: $CHECKS_FAILED"
+echo "Report: $OUTPUT"

@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# monitor-alert: 监控告警查询
+# Usage: monitor-alert [--service <name>] [--status critical|warning] [--since 1h]
+
+set -euo pipefail
+
+SERVICE=""
+STATUS=""
+SINCE="1h"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --service)
+            SERVICE="$2"
+            shift 2
+            ;;
+        --status)
+            STATUS="$2"
+            shift 2
+            ;;
+        --since)
+            SINCE="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+echo "=== Monitor Alert Query ==="
+echo "Service: ${SERVICE:-all}"
+echo "Status: ${STATUS:-all}"
+echo "Since: $SINCE"
+echo ""
+
+# Check system resources
+echo "=== System Resources ==="
+CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 2>/dev/null || echo "N/A")
+MEM=$(free | grep Mem | awk '{printf "%.1f", $3/$2 * 100.0}' 2>/dev/null || echo "N/A")
+DISK=$(df / | tail -1 | awk '{print $5}' | cut -d'%' -f1 2>/dev/null || echo "N/A")
+
+echo "CPU Usage: ${CPU}%"
+echo "Memory Usage: ${MEM}%"
+echo "Disk Usage: ${DISK}%"
+
+# Check for high resource usage
+if [[ "$CPU" != "N/A" ]] && (( $(echo "$CPU > 80" | bc -l 2>/dev/null || echo 0) )); then
+    echo "⚠ HIGH CPU USAGE"
+fi
+if [[ "$MEM" != "N/A" ]] && (( $(echo "$MEM > 90" | bc -l 2>/dev/null || echo 0) )); then
+    echo "⚠ HIGH MEMORY USAGE"
+fi
+if [[ "$DISK" != "N/A" ]] && [[ "$DISK" -gt 90 ]]; then
+    echo "⚠ HIGH DISK USAGE"
+fi
+
+# Check running processes
+echo ""
+echo "=== Top Processes ==="
+ps aux --sort=-%cpu | head -6 | tail -5 2>/dev/null || true
+
+# Check recent logs for errors
+echo ""
+echo "=== Recent Errors ==="
+if [[ -f "/var/log/syslog" ]]; then
+    grep -i "error\|fail\|critical" /var/log/syslog 2>/dev/null | tail -5 || echo "No recent errors"
+elif command -v journalctl >/dev/null 2>&1; then
+    journalctl --since "$SINCE" --priority=err --no-pager 2>/dev/null | tail -5 || echo "No recent errors"
+else
+    echo "No log access available"
+fi
+
+echo ""
+echo "=== Alert Summary ==="
+echo "Check completed at $(date -u +%Y-%m-%dT%H:%M:%SZ)"

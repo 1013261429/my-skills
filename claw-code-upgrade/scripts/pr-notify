@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# pr-notify: PR通知发送
+# Usage: pr-notify --pr <number> --message "message" [--channel slack|discord|email]
+
+set -euo pipefail
+
+PR=""
+MESSAGE=""
+CHANNEL="slack"
+REPO=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --pr)
+            PR="$2"
+            shift 2
+            ;;
+        --message)
+            MESSAGE="$2"
+            shift 2
+            ;;
+        --channel)
+            CHANNEL="$2"
+            shift 2
+            ;;
+        --repo)
+            REPO="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$PR" ]] || [[ -z "$MESSAGE" ]]; then
+    echo "Usage: pr-notify --pr <number> --message \"message\" [--channel slack|discord]"
+    exit 1
+fi
+
+# Auto-detect repo
+if [[ -z "$REPO" ]]; then
+    REPO=$(git remote get-url origin 2>/dev/null | sed 's/.*github.com[:\/]//' | sed 's/\.git$//')
+fi
+
+echo "=== PR Notification ==="
+echo "PR: #$PR"
+echo "Channel: $CHANNEL"
+echo "Message: $MESSAGE"
+echo ""
+
+# Format message
+FULL_MESSAGE="PR #$PR in $REPO: $MESSAGE\n$(gh pr view "$PR" --repo "$REPO" --json url -q .url 2>/dev/null || echo "")"
+
+ case "$CHANNEL" in
+     slack)
+         if [[ -n "${SLACK_WEBHOOK_URL:-}" ]]; then
+             curl -s -X POST -H 'Content-type: application/json' \
+                 --data "{\"text\":\"$FULL_MESSAGE\"}" \
+                 "$SLACK_WEBHOOK_URL" >/dev/null 2>&1 && echo "✓ Slack notification sent"
+         else
+             echo "Set SLACK_WEBHOOK_URL to enable Slack notifications"
+         fi
+         ;;
+     discord)
+         if [[ -n "${DISCORD_WEBHOOK_URL:-}" ]]; then
+             curl -s -X POST -H 'Content-type: application/json' \
+                 --data "{\"content\":\"$FULL_MESSAGE\"}" \
+                 "$DISCORD_WEBHOOK_URL" >/dev/null 2>&1 && echo "✓ Discord notification sent"
+         else
+             echo "Set DISCORD_WEBHOOK_URL to enable Discord notifications"
+         fi
+         ;;
+     *)
+         echo "Notification: $FULL_MESSAGE"
+         ;;
+ esac

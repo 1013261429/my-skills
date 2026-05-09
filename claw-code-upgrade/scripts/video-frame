@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# video-frame: 视频帧提取工具
+# Usage: video-frame <input> [--rate 1] [--output-dir frames/] [--format jpg]
+
+set -euo pipefail
+
+INPUT=""
+RATE=1
+OUTPUT_DIR="frames"
+FORMAT="jpg"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --rate)
+            RATE="$2"
+            shift 2
+            ;;
+        --output-dir)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+        *)
+            if [[ -z "$INPUT" ]]; then
+                INPUT="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$INPUT" ]] || [[ ! -f "$INPUT" ]]; then
+    echo "Usage: video-frame <input> [--rate 1] [--output-dir frames/] [--format jpg]"
+    exit 1
+fi
+
+if ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "ffmpeg not found. Install with: apt-get install ffmpeg"
+    exit 1
+fi
+
+mkdir -p "$OUTPUT_DIR"
+
+BASENAME=$(basename "$INPUT")
+NAME="${BASENAME%.*}"
+
+ffmpeg -y -i "$INPUT" -vf "fps=$RATE,scale='min(1920,iw)':-1" \
+    "$OUTPUT_DIR/${NAME}_frame_%04d.${FORMAT}" 2>/dev/null
+
+FRAME_COUNT=$(find "$OUTPUT_DIR" -name "${NAME}_frame_*.${FORMAT}" | wc -l)
+
+echo "✓ Extracted $FRAME_COUNT frames to $OUTPUT_DIR/"
+echo "  Pattern: ${NAME}_frame_%04d.${FORMAT}"

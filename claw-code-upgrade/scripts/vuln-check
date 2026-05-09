@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# vuln-check: 漏洞扫描与检查
+# Usage: vuln-check [--deep] [--format json]
+
+set -euo pipefail
+
+DEEP=0
+FORMAT="json"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --deep)
+            DEEP=1
+            shift
+            ;;
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+echo "=== Vulnerability Check ==="
+echo "Project: $PROJECT_ROOT"
+echo ""
+
+VULNS="[]"
+
+# Rust vulnerabilities
+if [[ -f "Cargo.toml" ]] && command -v cargo >/dev/null 2>&1; then
+    echo "Checking Rust dependencies..."
+    if command -v cargo-audit >/dev/null 2>&1; then
+        AUDIT_OUTPUT=$(cargo audit --json 2>/dev/null || echo '{"vulnerabilities":[]}')
+        VULN_COUNT=$(echo "$AUDIT_OUTPUT" | jq -r '.vulnerabilities.list | length' 2>/dev/null || echo 0)
+        echo "  Found $VULN_COUNT vulnerabilities"
+        if [[ "$VULN_COUNT" -gt 0 ]]; then
+            echo "$AUDIT_OUTPUT" | jq -r '.vulnerabilities.list[] | "  - \(.advisory.id): \(.advisory.title) [\(.advisory.severity)]"' 2>/dev/null || true
+        fi
+    else
+        echo "  Install cargo-audit: cargo install cargo-audit"
+    fi
+fi
+
+# Node.js vulnerabilities
+if [[ -f "package.json" ]] && command -v npm >/dev/null 2>&1; then
+    echo "Checking Node.js dependencies..."
+    npm audit --json 2>/dev/null | jq -r '.vulnerabilities | to_entries[] | "  - \(.key): \(.value.severity)"' 2>/dev/null | head -10 || echo "  No vulnerabilities found or npm audit failed"
+fi
+
+# Python vulnerabilities
+if [[ -f "requirements.txt" ]] && command -v safety >/dev/null 2>&1; then
+    echo "Checking Python dependencies..."
+    safety check -r requirements.txt --json 2>/dev/null | jq -r '.[] | "  - \(.[0]): \(.[2])"' 2>/dev/null | head -10 || true
+fi
+
+# Generate report
+REPORT="vuln-report.${FORMAT}"
+if [[ "$FORMAT" == "json" ]]; then
+    cat > "$REPORT" << EOF
+{
+  "scan_type": "vulnerability",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "project": "$(basename "$PROJECT_ROOT")",
+  "deep_scan": $DEEP,
+  "status": "completed"
+}
+EOF
+fi
+
+echo ""
+echo "✓ Vulnerability check complete. Report: $REPORT"

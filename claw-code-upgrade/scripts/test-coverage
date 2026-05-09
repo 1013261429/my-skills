@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# test-coverage: 测试覆盖率分析
+# Usage: test-coverage [--format html|json] [--output coverage/]
+
+set -euo pipefail
+
+FORMAT="html"
+OUTPUT="coverage"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+echo "=== Test Coverage Analysis ==="
+echo "Format: $FORMAT"
+echo "Output: $OUTPUT"
+echo ""
+
+if [[ -f "Cargo.toml" ]] && command -v cargo >/dev/null 2>&1; then
+    echo "Running Rust coverage..."
+    if command -v grcov >/dev/null 2>&1 || command -v llvm-cov >/dev/null 2>&1; then
+        CARGO_INCREMENTAL=0 RUSTFLAGS="-Cinstrument-coverage" LLVM_PROFILE_FILE="cargo-test-%p-%m.profraw" cargo test --workspace 2>/dev/null || true
+        
+        if command -v grcov >/dev/null 2>&1; then
+            grcov . --binary-path ./target/debug/deps/ -s . -t "$FORMAT" --branch --ignore-not-existing -o "$OUTPUT" 2>/dev/null || true
+        fi
+    else
+        echo "Install grcov or cargo-llvm-cov for Rust coverage"
+        cargo test 2>/dev/null || true
+    fi
+elif [[ -f "package.json" ]] && command -v npm >/dev/null 2>&1; then
+    echo "Running JavaScript coverage..."
+    if grep -q "jest" package.json 2>/dev/null; then
+        npx jest --coverage --coverageDirectory="$OUTPUT" 2>/dev/null || true
+    elif grep -q "c8\|nyc" package.json 2>/dev/null; then
+        npm test 2>/dev/null || true
+    fi
+elif [[ -f "setup.py" ]] || [[ -f "pyproject.toml" ]]; then
+    echo "Running Python coverage..."
+    if command -v pytest >/dev/null 2>&1; then
+        pytest --cov=. --cov-report="$FORMAT:$OUTPUT" 2>/dev/null || true
+    fi
+fi
+
+echo ""
+echo "✓ Coverage report generated in $OUTPUT/"

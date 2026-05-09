@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# audio-convert: 音频格式转换与处理
+# Usage: audio-convert <input> [--format mp3|wav|ogg|flac] [--bitrate 128k] [--trim START,END]
+
+set -euo pipefail
+
+INPUT=""
+FORMAT="mp3"
+BITRATE=""
+TRIM=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        --bitrate)
+            BITRATE="$2"
+            shift 2
+            ;;
+        --trim)
+            TRIM="$2"
+            shift 2
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+        *)
+            if [[ -z "$INPUT" ]]; then
+                INPUT="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$INPUT" ]] || [[ ! -f "$INPUT" ]]; then
+    echo "Usage: audio-convert <input> [--format mp3|wav|ogg|flac] [--bitrate 128k] [--trim START,END]"
+    exit 1
+fi
+
+# Check for ffmpeg
+if ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "ffmpeg not found. Install with: apt-get install ffmpeg"
+    exit 1
+fi
+
+BASENAME=$(basename "$INPUT")
+NAME="${BASENAME%.*}"
+OUTPUT="${NAME}.${FORMAT}"
+
+CMD=(ffmpeg -y -i "$INPUT")
+
+if [[ -n "$TRIM" ]]; then
+    START=$(echo "$TRIM" | cut -d',' -f1)
+    END=$(echo "$TRIM" | cut -d',' -f2)
+    CMD+=(-ss "$START" -to "$END")
+fi
+
+if [[ -n "$BITRATE" ]]; then
+    CMD+=(-b:a "$BITRATE")
+fi
+
+# Codec selection
+ case "$FORMAT" in
+     mp3)
+         CMD+=(-c:a libmp3lame)
+         ;;
+     ogg)
+         CMD+=(-c:a libvorbis)
+         ;;
+     flac)
+         CMD+=(-c:a flac)
+         ;;
+     wav)
+         CMD+=(-c:a pcm_s16le)
+         ;;
+ esac
+
+CMD+=("$OUTPUT")
+
+"${CMD[@]}" 2>/dev/null
+
+echo "✓ Audio converted: $OUTPUT"
+ffprobe -v error -show_entries format=duration,size -of csv=p=0 "$OUTPUT" 2>/dev/null | awk -F',' '{print "  Duration: "$1"s, Size: "$2" bytes"}'

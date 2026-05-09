@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# doc-api: API文档自动生成
+# Usage: doc-api [--source-dir src/] [--output docs/api/]
+
+set -euo pipefail
+
+SOURCE_DIR="src"
+OUTPUT="docs/api"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --source-dir)
+            SOURCE_DIR="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+mkdir -p "$OUTPUT"
+
+echo "=== API Documentation Generation ==="
+echo "Source: $SOURCE_DIR"
+echo "Output: $OUTPUT"
+echo ""
+
+# Rust documentation
+if [[ -f "Cargo.toml" ]]; then
+    echo "Generating Rust docs..."
+    cargo doc --no-deps 2>/dev/null || true
+    if [[ -d "target/doc" ]]; then
+        cp -r target/doc/* "$OUTPUT/" 2>/dev/null || true
+        echo "✓ Rust docs copied"
+    fi
+fi
+
+# Python documentation
+if [[ -f "setup.py" ]] || [[ -f "pyproject.toml" ]]; then
+    echo "Generating Python docs..."
+    if command -v pydoc >/dev/null 2>&1; then
+        find "$SOURCE_DIR" -name "*.py" | while read -r f; do
+            module=$(echo "$f" | sed 's/\//./g' | sed 's/\.py$//')
+            pydoc -w "$module" 2>/dev/null || true
+        done
+        mv *.html "$OUTPUT/" 2>/dev/null || true
+    fi
+fi
+
+# JavaScript/TypeScript documentation
+if [[ -f "package.json" ]]; then
+    echo "Generating JS/TS docs..."
+    if grep -q "typedoc" package.json 2>/dev/null; then
+        npx typedoc --out "$OUTPUT" 2>/dev/null || true
+    fi
+fi
+
+# Generate index.html
+INDEX="$OUTPUT/index.html"
+cat > "$INDEX" << EOF
+<!DOCTYPE html>
+<html>
+<head><title>API Documentation</title></head>
+<body>
+<h1>API Documentation</h1>
+<p>Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)</p>
+<ul>
+<li><a href="./">Browse API docs</a></li>
+</ul>
+</body>
+</html>
+EOF
+
+echo ""
+echo "✓ API documentation generated in $OUTPUT/"

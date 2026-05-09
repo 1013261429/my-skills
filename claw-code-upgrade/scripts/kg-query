@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# kg-query: 知识图谱查询工具
+# Usage: kg-query <query> [--graph knowledge-graph.json]
+
+set -euo pipefail
+
+QUERY=""
+GRAPH="knowledge-graph.json"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --graph)
+            GRAPH="$2"
+            shift 2
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+        *)
+            if [[ -z "$QUERY" ]]; then
+                QUERY="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$QUERY" ]]; then
+    echo "Usage: kg-query <query> [--graph knowledge-graph.json]"
+    exit 1
+fi
+
+if [[ ! -f "$GRAPH" ]]; then
+    echo "Graph file not found: $GRAPH"
+    echo "Run kg-build first to generate the knowledge graph"
+    exit 1
+fi
+
+echo "=== Knowledge Graph Query ==="
+echo "Query: $QUERY"
+echo ""
+
+if command -v jq >/dev/null 2>&1; then
+    # Query nodes matching the search term
+    echo "=== Matching Nodes ==="
+    jq -r --arg q "$QUERY" '.nodes[] | select(.id | contains($q)) | "  [\(.type)] \(.id) in \(.file):\(.line)"' "$GRAPH" 2>/dev/null || echo "  No matches found"
+    
+    echo ""
+    echo "=== Related Connections ==="
+    jq -r --arg q "$QUERY" '
+        .nodes[] | select(.id | contains($q)) | .id as $node_id |
+        .edges[]? | select(.source == $node_id or .target == $node_id) |
+        "  \(.source) --[\(.type)]--> \(.target)"
+    ' "$GRAPH" 2>/dev/null | head -20 || echo "  No connections found"
+    
+    echo ""
+    echo "=== Graph Statistics ==="
+    jq '.stats' "$GRAPH" 2>/dev/null || true
+else
+    echo "jq required for graph queries. Install with: apt-get install jq"
+fi

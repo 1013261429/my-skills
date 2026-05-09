@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# complexity-report: 代码复杂度分析报告
+# Usage: complexity-report [--threshold 10] [--output report.html]
+
+set -euo pipefail
+
+THRESHOLD=10
+OUTPUT="complexity-report.html"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --threshold)
+            THRESHOLD="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Generate HTML report
+cat > "$OUTPUT" << 'HTMLEOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Code Complexity Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        h1 { color: #333; }
+        .metric { margin: 10px 0; padding: 10px; background: #f5f5f5; border-radius: 4px; }
+        .warning { background: #fff3cd; }
+        .danger { background: #f8d7da; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background: #4CAF50; color: white; }
+    </style>
+</head>
+<body>
+    <h1>Code Complexity Report</h1>
+    <div class="metric">
+        <strong>Project:</strong> PROJECT_ROOT_PLACEHOLDER<br>
+        <strong>Generated:</strong> TIMESTAMP_PLACEHOLDER<br>
+        <strong>Threshold:</strong> THRESHOLD_PLACEHOLDER
+    </div>
+    <h2>File Metrics</h2>
+    <table>
+        <tr><th>File</th><th>Lines</th><th>Functions</th><th>Complexity</th><th>Status</th></tr>
+HTMLEOF
+
+# Analyze each source file
+find "$PROJECT_ROOT" -type f \( -name "*.rs" -o -name "*.py" -o -name "*.js" -o -name "*.ts" \) -not -path "*/target/*" -not -path "*/node_modules/*" | while read -r f; do
+    rel_path="${f#$PROJECT_ROOT/}"
+    lines=$(wc -l < "$f")
+    funcs=$(grep -c "^\s*fn \|^\s*def \|^\s*function " "$f" 2>/dev/null || echo 0)
+    
+    # Simple complexity heuristic
+    complexity=$((funcs > 0 ? lines / funcs : lines))
+    
+    if [[ $complexity -gt $THRESHOLD ]]; then
+        status="<span style='color:red'>⚠ High</span>"
+        class="danger"
+    else
+        status="<span style='color:green'>✓ OK</span>"
+        class=""
+    fi
+    
+    echo "        <tr class='$class'><td>$rel_path</td><td>$lines</td><td>$funcs</td><td>$complexity</td><td>$status</td></tr>" >> "$OUTPUT"
+done
+
+cat >> "$OUTPUT" << 'HTMLEOF'
+    </table>
+    <h2>Recommendations</h2>
+    <ul>
+        <li>Functions with complexity > threshold should be refactored</li>
+        <li>Consider extracting helper functions for complex logic</li>
+        <li>Use early returns to reduce nesting</li>
+    </ul>
+</body>
+</html>
+HTMLEOF
+
+# Replace placeholders
+sed -i "s|PROJECT_ROOT_PLACEHOLDER|$PROJECT_ROOT|g" "$OUTPUT"
+sed -i "s|TIMESTAMP_PLACEHOLDER|$(date -u +%Y-%m-%dT%H:%M:%SZ)|g" "$OUTPUT"
+sed -i "s|THRESHOLD_PLACEHOLDER|$THRESHOLD|g" "$OUTPUT"
+
+echo "✓ Complexity report generated: $OUTPUT"

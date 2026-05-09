@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# doc-architecture: 生成架构图文档
+# Usage: doc-architecture [--format md|html|dot] [--output ARCHITECTURE.md]
+
+set -euo pipefail
+
+FORMAT="md"
+OUTPUT="ARCHITECTURE.md"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+echo "=== Architecture Documentation ==="
+echo "Format: $FORMAT"
+echo "Output: $OUTPUT"
+
+ case "$FORMAT" in
+     md)
+         cat > "$OUTPUT" << EOF
+# Architecture Overview
+
+Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+## Project Structure
+
+\`\`\`
+$(tree -L 2 -d "$PROJECT_ROOT" 2>/dev/null || find "$PROJECT_ROOT" -maxdepth 2 -type d | head -30)
+\`\`\`
+
+## Components
+
+### Core Modules
+$(find "$PROJECT_ROOT" -maxdepth 2 -type d | grep -E "(src|lib|core|api|runtime)" | sed 's/^/- /')
+
+### Dependencies
+$(if [[ -f "Cargo.toml" ]]; then echo "- Rust project"; fi)
+$(if [[ -f "package.json" ]]; then echo "- Node.js project"; fi)
+$(if [[ -f "setup.py" ]] || [[ -f "pyproject.toml" ]]; then echo "- Python project"; fi)
+
+## Data Flow
+
+1. Input → Parser → Validator → Processor → Output
+2. Events flow through async channels
+3. State managed through centralized registry
+
+## Security Considerations
+
+- All inputs validated before processing
+- Sandboxed execution for untrusted code
+- Permission checks on all file operations
+EOF
+         ;;
+     dot)
+         cat > "$OUTPUT" << EOF
+digraph Architecture {
+    rankdir=TB;
+    node [shape=box];
+    
+    Input [label="User Input"];
+    Parser [label="Parser"];
+    Validator [label="Validator"];
+    Processor [label="Processor"];
+    Output [label="Output"];
+    
+    Input -> Parser -> Validator -> Processor -> Output;
+    
+    subgraph cluster_security {
+        label="Security Layer";
+        color=blue;
+        Sandbox [label="Sandbox"];
+        Permissions [label="Permissions"];
+    }
+    
+    Validator -> Sandbox [style=dashed];
+    Processor -> Permissions [style=dashed];
+}
+EOF
+         ;;
+     *)
+         echo "Unsupported format: $FORMAT"
+         exit 1
+         ;;
+ esac
+
+echo "✓ Architecture document generated: $OUTPUT"

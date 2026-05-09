@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# image-process: 图像处理工具
+# Usage: image-process <input> [--resize WxH] [--format png|jpg|webp] [--optimize]
+
+set -euo pipefail
+
+INPUT=""
+RESIZE=""
+FORMAT=""
+OPTIMIZE=0
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --resize)
+            RESIZE="$2"
+            shift 2
+            ;;
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        --optimize)
+            OPTIMIZE=1
+            shift
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+        *)
+            if [[ -z "$INPUT" ]]; then
+                INPUT="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "$INPUT" ]] || [[ ! -f "$INPUT" ]]; then
+    echo "Usage: image-process <input> [--resize WxH] [--format png|jpg|webp] [--optimize]"
+    exit 1
+fi
+
+# Check for ImageMagick
+if ! command -v convert >/dev/null 2>&1; then
+    echo "ImageMagick not found. Install with: apt-get install imagemagick"
+    exit 1
+fi
+
+BASENAME=$(basename "$INPUT")
+EXT="${BASENAME##*.}"
+NAME="${BASENAME%.*}"
+
+# Determine output format
+OUTPUT_EXT="${FORMAT:-$EXT}"
+OUTPUT="${NAME}_processed.${OUTPUT_EXT}"
+
+CMD=(convert "$INPUT")
+
+if [[ -n "$RESIZE" ]]; then
+    CMD+=(-resize "$RESIZE")
+fi
+
+if [[ "$OPTIMIZE" -eq 1 ]]; then
+    CMD+=(-strip -interlace Plane -quality 85)
+fi
+
+CMD+=("$OUTPUT")
+
+"${CMD[@]}"
+
+echo "✓ Image processed: $OUTPUT"
+
+# Get image info
+if command -v identify >/dev/null 2>&1; then
+    identify "$OUTPUT" | awk '{print "  Size: "$3", Format: "$2}'
+fi

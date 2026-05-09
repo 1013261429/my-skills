@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# rbac-config: 配置RBAC权限矩阵
+# Usage: rbac-config --mode <plan|acceptEdits|dontAsk|auto> [--tools tool1,tool2]
+
+set -euo pipefail
+
+MODE=""
+TOOLS=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --mode)
+            MODE="$2"
+            shift 2
+            ;;
+        --tools)
+            TOOLS="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$MODE" ]]; then
+    echo "Usage: rbac-config --mode <plan|acceptEdits|dontAsk|auto> [--tools tool1,tool2]"
+    exit 1
+fi
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+SETTINGS_DIR="$PROJECT_ROOT/.claw"
+SETTINGS_FILE="$SETTINGS_DIR/settings.local.json"
+
+mkdir -p "$SETTINGS_DIR"
+
+# Create or update settings
+if [[ -f "$SETTINGS_FILE" ]]; then
+    if command -v jq >/dev/null 2>&1; then
+        jq --arg mode "$MODE" '.permissions.defaultMode = $mode' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp"
+        mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+        
+        if [[ -n "$TOOLS" ]]; then
+            IFS=',' read -ra TOOL_ARRAY <<< "$TOOLS"
+            jq --argjson tools "$(printf '%s\n' "${TOOL_ARRAY[@]}" | jq -R . | jq -s .)" '.permissions.allowedTools = $tools' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp"
+            mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+        fi
+    else
+        echo "jq required for config updates"
+        exit 1
+    fi
+else
+    cat > "$SETTINGS_FILE" << EOF
+{
+  "permissions": {
+    "defaultMode": "$MODE"
+  }
+}
+EOF
+    
+    if [[ -n "$TOOLS" ]]; then
+        IFS=',' read -ra TOOL_ARRAY <<< "$TOOLS"
+        if command -v jq >/dev/null 2>&1; then
+            jq --argjson tools "$(printf '%s\n' "${TOOL_ARRAY[@]}" | jq -R . | jq -s .)" '.permissions.allowedTools = $tools' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp"
+            mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+        fi
+    fi
+fi
+
+echo "✓ RBAC configuration updated"
+echo "  Mode: $MODE"
+[[ -n "$TOOLS" ]] && echo "  Tools: $TOOLS"

@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# kg-build: 知识图谱构建工具
+# Usage: kg-build [--source-dir src/] [--output knowledge-graph.json]
+
+set -euo pipefail
+
+SOURCE_DIR="src"
+OUTPUT="knowledge-graph.json"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --source-dir)
+            SOURCE_DIR="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+echo "=== Building Knowledge Graph ==="
+echo "Source: $SOURCE_DIR"
+echo "Output: $OUTPUT"
+
+# Initialize JSON structure
+NODES=""
+EDGES=""
+NODE_COUNT=0
+
+# Extract functions/methods as nodes
+if [[ -d "$SOURCE_DIR" ]]; then
+    find "$SOURCE_DIR" -type f \( -name "*.rs" -o -name "*.py" -o -name "*.js" \) | while read -r f; do
+        rel_path="${f#$PROJECT_ROOT/}"
+        
+        # Extract function definitions
+        grep -n "^\s*fn \|^\s*def \|^\s*function " "$f" 2>/dev/null | while read -r line; do
+            lineno=$(echo "$line" | cut -d':' -f1)
+            func=$(echo "$line" | sed 's/.*fn \|.*def \|.*function //' | cut -d'(' -f1 | tr -d ' ')
+            
+            # Add node
+            echo "{\"id\":\"$func\",\"type\":\"function\",\"file\":\"$rel_path\",\"line\":$lineno}" >> "$OUTPUT.nodes.tmp"
+            
+            # Find calls to other functions in same file
+            grep -n "$func(" "$f" 2>/dev/null | head -5 | while read -r call; do
+                call_line=$(echo "$call" | cut -d':' -f1)
+                if [[ "$call_line" != "$lineno" ]]; then
+                    echo "{\"source\":\"caller\",\"target\":\"$func\",\"type\":\"calls\"}" >> "$OUTPUT.edges.tmp"
+                fi
+            done
+        done
+    done
+fi
+
+# Build final JSON
+NODES_JSON=$(cat "$OUTPUT.nodes.tmp" 2>/dev/null | paste -sd',' | sed 's/^/[/' | sed 's/$/]/')
+EDGES_JSON=$(cat "$OUTPUT.edges.tmp" 2>/dev/null | paste -sd',' | sed 's/^/[/' | sed 's/$/]/')
+
+if [[ -z "$NODES_JSON" ]]; then NODES_JSON="[]"; fi
+if [[ -z "$EDGES_JSON" ]]; then EDGES_JSON="[]"; fi
+
+cat > "$OUTPUT" << EOF
+{
+  "project": "$(basename "$PROJECT_ROOT")",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "nodes": $NODES_JSON,
+  "edges": $EDGES_JSON,
+  "stats": {
+    "total_nodes": $(cat "$OUTPUT.nodes.tmp" 2>/dev/null | wc -l | tr -d ' '),
+    "total_edges": $(cat "$OUTPUT.edges.tmp" 2>/dev/null | wc -l | tr -d ' ')
+  }
+}
+EOF
+
+rm -f "$OUTPUT.nodes.tmp" "$OUTPUT.edges.tmp"
+
+echo "✓ Knowledge graph built: $OUTPUT"

@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# test-discover: 自动发现测试文件和用例
+# Usage: test-discover [--framework pytest|cargo|jest] [--output tests.json]
+
+set -euo pipefail
+
+FRAMEWORK=""
+OUTPUT="tests.json"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --framework)
+            FRAMEWORK="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Auto-detect framework
+if [[ -z "$FRAMEWORK" ]]; then
+    if [[ -f "Cargo.toml" ]]; then
+        FRAMEWORK="cargo"
+    elif [[ -f "package.json" ]]; then
+        FRAMEWORK="jest"
+    elif [[ -f "setup.py" ]] || [[ -f "pyproject.toml" ]] || [[ -d "tests" ]]; then
+        FRAMEWORK="pytest"
+    else
+        FRAMEWORK="generic"
+    fi
+fi
+
+echo "=== Test Discovery ==="
+echo "Framework: $FRAMEWORK"
+echo "Project: $PROJECT_ROOT"
+echo ""
+
+TESTS="[]"
+
+ case "$FRAMEWORK" in
+     cargo)
+         echo "Discovering Rust tests..."
+         TEST_FILES=$(find "$PROJECT_ROOT" -name "*.rs" -path "*/tests/*" -o -name "*test*.rs" | grep -v target)
+         for f in $TEST_FILES; do
+             rel="${f#$PROJECT_ROOT/}"
+             echo "  Found test file: $rel"
+         done
+         
+         # List test names with cargo
+         if command -v cargo >/dev/null 2>&1; then
+             echo ""
+             echo "=== Test Cases ==="
+             cargo test -- --list 2>/dev/null | grep "test " | head -20 || true
+         fi
+         ;;
+     pytest)
+         echo "Discovering Python tests..."
+         if command -v pytest >/dev/null 2>&1; then
+             pytest --collect-only 2>/dev/null | grep "<Function " | head -20 || true
+         else
+             find "$PROJECT_ROOT" -name "test_*.py" -o -name "*_test.py" | while read -r f; do
+                 rel="${f#$PROJECT_ROOT/}"
+                 echo "  Found: $rel"
+             done
+         fi
+         ;;
+     jest)
+         echo "Discovering JavaScript tests..."
+         find "$PROJECT_ROOT" -name "*.test.js" -o -name "*.spec.js" | while read -r f; do
+             rel="${f#$PROJECT_ROOT/}"
+             echo "  Found: $rel"
+         done
+         ;;
+     *)
+         echo "Generic test discovery..."
+         find "$PROJECT_ROOT" -type f \( -name "*test*" -o -name "*spec*" \) | grep -v node_modules | grep -v target | head -20
+         ;;
+ esac
+
+# Generate JSON output
+if command -v jq >/dev/null 2>&1; then
+    cat > "$OUTPUT" << EOF
+{
+  "framework": "$FRAMEWORK",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "test_files": $(find "$PROJECT_ROOT" -type f \( -name "*test*" -o -name "*spec*" \) | grep -v node_modules | grep -v target | jq -R . | jq -s .),
+  "project": "$(basename "$PROJECT_ROOT")"
+}
+EOF
+    echo ""
+    echo "✓ Test manifest saved to $OUTPUT"
+fi

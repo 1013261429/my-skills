@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# perf-benchmark: 性能基准测试
+# Usage: perf-benchmark [--command "cargo test"] [--iterations 5] [--output perf.json]
+
+set -euo pipefail
+
+COMMAND=""
+ITERATIONS=5
+OUTPUT="perf.json"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --command)
+            COMMAND="$2"
+            shift 2
+            ;;
+        --iterations)
+            ITERATIONS="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$COMMAND" ]]; then
+    echo "Usage: perf-benchmark --command \"your command\" [--iterations 5]"
+    exit 1
+fi
+
+echo "=== Performance Benchmark ==="
+echo "Command: $COMMAND"
+echo "Iterations: $ITERATIONS"
+echo ""
+
+TIMES=""
+TOTAL=0
+
+for i in $(seq 1 $ITERATIONS); do
+    echo "Run $i/$ITERATIONS..."
+    START=$(date +%s%N)
+    eval "$COMMAND" >/dev/null 2>&1 || true
+    END=$(date +%s%N)
+    
+    DURATION=$(( (END - START) / 1000000 ))  # Convert to ms
+    TIMES="$TIMES $DURATION"
+    TOTAL=$((TOTAL + DURATION))
+    echo "  Duration: ${DURATION}ms"
+done
+
+# Calculate statistics
+AVG=$((TOTAL / ITERATIONS))
+MIN=$(echo "$TIMES" | tr ' ' '\n' | sort -n | head -1)
+MAX=$(echo "$TIMES" | tr ' ' '\n' | sort -n | tail -1)
+
+echo ""
+echo "=== Results ==="
+echo "Average: ${AVG}ms"
+echo "Min: ${MIN}ms"
+echo "Max: ${MAX}ms"
+
+# Generate JSON report
+cat > "$OUTPUT" << EOF
+{
+  "command": "$COMMAND",
+  "iterations": $ITERATIONS,
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "results": {
+    "average_ms": $AVG,
+    "min_ms": $MIN,
+    "max_ms": $MAX,
+    "total_ms": $TOTAL,
+    "times": [$(echo "$TIMES" | tr ' ' '\n' | grep -v '^$' | paste -sd',')]
+  }
+}
+EOF
+
+echo "✓ Benchmark report: $OUTPUT"

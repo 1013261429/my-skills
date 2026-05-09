@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# doc-changelog: 自动生成CHANGELOG
+# Usage: doc-changelog [--since v1.0.0] [--output CHANGELOG.md]
+
+set -euo pipefail
+
+SINCE=""
+OUTPUT="CHANGELOG.md"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --since)
+            SINCE="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+echo "=== Changelog Generation ==="
+echo "Output: $OUTPUT"
+echo ""
+
+# Get version
+VERSION=$(git describe --tags --always 2>/dev/null || echo "unreleased")
+DATE=$(date -u +%Y-%m-%d)
+
+# Generate changelog
+cat > "$OUTPUT" << EOF
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [$VERSION] - $DATE
+
+EOF
+
+# Get commits since last tag or all
+if [[ -n "$SINCE" ]]; then
+    RANGE="${SINCE}..HEAD"
+else
+    RANGE="HEAD"
+fi
+
+# Categorize commits
+echo "### Features" >> "$OUTPUT"
+git log "$RANGE" --pretty=format:"- %s (%h)" --grep="^feat\|^feature\|^add" 2>/dev/null | head -20 >> "$OUTPUT" || echo "- No new features" >> "$OUTPUT"
+echo "" >> "$OUTPUT"
+
+echo "### Bug Fixes" >> "$OUTPUT"
+git log "$RANGE" --pretty=format:"- %s (%h)" --grep="^fix\|^bugfix\|^hotfix" 2>/dev/null | head -20 >> "$OUTPUT" || echo "- No bug fixes" >> "$OUTPUT"
+echo "" >> "$OUTPUT"
+
+echo "### Performance" >> "$OUTPUT"
+git log "$RANGE" --pretty=format:"- %s (%h)" --grep="^perf\|^performance\|^optimize" 2>/dev/null | head -20 >> "$OUTPUT" || echo "- No performance improvements" >> "$OUTPUT"
+echo "" >> "$OUTPUT"
+
+echo "### Documentation" >> "$OUTPUT"
+git log "$RANGE" --pretty=format:"- %s (%h)" --grep="^doc\|^docs\|^readme" 2>/dev/null | head -20 >> "$OUTPUT" || echo "- No documentation changes" >> "$OUTPUT"
+echo "" >> "$OUTPUT"
+
+# Add contributors
+CONTRIBUTORS=$(git log "$RANGE" --pretty=format:"%an" | sort -u | tr '\n' ', ' | sed 's/, $//')
+if [[ -n "$CONTRIBUTORS" ]]; then
+    echo "### Contributors" >> "$OUTPUT"
+    echo "$CONTRIBUTORS" | tr ',' '\n' | sed 's/^/- /' >> "$OUTPUT"
+fi
+
+echo ""
+echo "✓ Changelog generated: $OUTPUT"
